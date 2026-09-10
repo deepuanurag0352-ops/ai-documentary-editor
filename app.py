@@ -642,8 +642,7 @@ def run_pipeline(audio_path: str, progress_bar, status_text) -> bool:
     if not clips:
         st.error("Could not build clip timeline from transcription.")
         return False
-        end_t = clips[-1]['end_time'] if clips else 0.0
-    st.info(f"Timeline built: {len(clips)} clips across {end_t:.1f}s of audio.")
+    st.info(f"Timeline built: {len(clips)} clips.")
 
     # STEP 3: Download and standardize clips
     status_text.text("Step 3/5 - Harvesting YouTube clips and standardizing frames...")
@@ -659,7 +658,9 @@ def run_pipeline(audio_path: str, progress_bar, status_text) -> bool:
         niche_info = match_niche(clip["keywords"])
         yt_url     = niche_info["url"]
         channel    = niche_info["channel"]
-        keyword    = clip["keywords"][0] if clip["keywords"] else clip["text"].split()[0]
+        kws        = clip.get("keywords", [])
+        words      = clip["text"].split() if clip["text"] else []
+        keyword    = kws[0] if kws else (words[0] if words else "documentary")
 
         raw_path  = str(TEMP_DIR / f"raw_{idx:04d}.mp4")
         std_path  = str(TEMP_DIR / f"std_{idx:04d}.mp4")
@@ -781,7 +782,7 @@ def main():
             if not allowed:
                 st.error(
                     f"Daily limit reached ({DAILY_LIMIT}/day). Come back tomorrow.",
-                                      icon="🚫",
+                    icon="🚫",
                 )
                 st.stop()
 
@@ -823,14 +824,14 @@ def main():
         st.info(
             "Upload a narration audio file (.mp3 / .wav / .m4a) to get started. "
             "All processing runs on the cloud — no local GPU needed.",
-                        icon="ℹ️",
+            icon="ℹ️",
         )
 
     st.markdown("---")
     st.markdown(
         "<p style='text-align:center;color:#555;font-size:0.8rem;'>"
         "Powered by Whisper · yt-dlp · FFmpeg · Streamlit — "
-        "All processing on Hugging Face cloud hardware.</p>",
+        "All processing on cloud hardware.</p>",
         unsafe_allow_html=True,
     )
 
