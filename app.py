@@ -642,7 +642,8 @@ def run_pipeline(audio_path: str, progress_bar, status_text) -> bool:
     if not clips:
         st.error("Could not build clip timeline from transcription.")
         return False
-    st.info(f"Timeline built: {len(clips)} clips across {clips[-1]['end_time']:.1f}s of audio.")
+        end_t = clips[-1]['end_time'] if clips else 0.0
+    st.info(f"Timeline built: {len(clips)} clips across {end_t:.1f}s of audio.")
 
     # STEP 3: Download and standardize clips
     status_text.text("Step 3/5 - Harvesting YouTube clips and standardizing frames...")
@@ -780,7 +781,7 @@ def main():
             if not allowed:
                 st.error(
                     f"Daily limit reached ({DAILY_LIMIT}/day). Come back tomorrow.",
-                    icon="X",
+                                      icon="🚫",
                 )
                 st.stop()
 
