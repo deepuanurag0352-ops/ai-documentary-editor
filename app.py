@@ -170,14 +170,16 @@ def transcribe_audio(audio_path: str) -> list:
     Returns list of dicts: {text, start_time, end_time}
     """
     try:
-        import whisper
-        model = whisper.load_model("base")
+               import whisper
+        model = whisper.load_model("tiny")
         result = model.transcribe(
             audio_path,
             verbose=False,
             word_timestamps=False,
             fp16=False,
-            language=None,
+            beam_size=1,
+            best_of=1,
+            temperature=0,
         )
         segments = []
         for seg in result.get("segments", []):
