@@ -166,11 +166,11 @@ def ensure_sfx():
 
 def transcribe_audio(audio_path: str) -> list:
     """
-    Run Whisper base model on ANY length audio - no minute cap.
+    Run Whisper tiny model on ANY length audio - super fast on CPU.
     Returns list of dicts: {text, start_time, end_time}
     """
     try:
-               import whisper
+        import whisper
         model = whisper.load_model("tiny")
         result = model.transcribe(
             audio_path,
