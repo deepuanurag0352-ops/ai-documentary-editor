@@ -822,7 +822,7 @@ def main():
         st.info(
             "Upload a narration audio file (.mp3 / .wav / .m4a) to get started. "
             "All processing runs on the cloud — no local GPU needed.",
-            icon="INFO",
+                        icon="ℹ️",
         )
 
     st.markdown("---")
