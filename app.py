@@ -17,6 +17,7 @@ TARGET_CLIP_MAX = 4.0
 FADE_DURATION  = 0.5
 FPS            = 30
 WIDTH, HEIGHT  = 1920, 1080
+
 NICHE_DB = {
     "tech": {
         "channel": "@TechVision",
@@ -95,7 +96,6 @@ def save_limits(data):
 
 
 def get_session_key():
-    """Use Streamlit session_id as a per-user key."""
     if "session_key" not in st.session_state:
         import uuid
         st.session_state["session_key"] = str(uuid.uuid4())
@@ -103,7 +103,6 @@ def get_session_key():
 
 
 def check_and_increment_limit():
-    """Returns (allowed: bool, remaining: int)."""
     key  = get_session_key()
     data = load_limits()
     today = _today_str()
@@ -129,8 +128,6 @@ def get_remaining_today():
         return DAILY_LIMIT
     return max(0, DAILY_LIMIT - user_data.get("count", 0))
 
-
-# SFX SETUP - download placeholder royalty-free assets if missing
 
 def ensure_sfx():
     SFX_DIR.mkdir(parents=True, exist_ok=True)
@@ -162,13 +159,23 @@ def ensure_sfx():
                 dest.write_bytes(b"")
 
 
-# MODULE 2 - WHISPER TRANSCRIPTION AND TIMELINE SEGMENTATION
+# MODULE 2 - WHISPER TRANSCRIPTION WITH DISK CACHE
 
 def transcribe_audio(audio_path: str) -> list:
     """
-    Run Whisper tiny model on ANY length audio - super fast on CPU.
-    Returns list of dicts: {text, start_time, end_time}
+    Run Whisper tiny model and cache to disk.
+    If session reconnects, it reloads instantly!
     """
+    cache_file = TEMP_DIR / "transcription_cache.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+                if cached:
+                    return cached
+        except Exception:
+            pass
+
     try:
         import whisper
         model = whisper.load_model("tiny")
@@ -188,6 +195,14 @@ def transcribe_audio(audio_path: str) -> list:
                 "start_time": float(seg["start"]),
                 "end_time":   float(seg["end"]),
             })
+        
+        # Save cache
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(segments, f)
+        except Exception:
+            pass
+
         return segments
     except Exception as e:
         st.warning(f"Whisper transcription error: {e}")
@@ -195,10 +210,6 @@ def transcribe_audio(audio_path: str) -> list:
 
 
 def build_clip_timeline(segments: list) -> list:
-    """
-    Merges raw Whisper segments into visual clips of 3.5-4.0 s each.
-    Returns list of dicts: {text, start_time, end_time, duration, keywords}
-    """
     if not segments:
         return []
 
@@ -239,7 +250,6 @@ def _make_clip_entry(texts, start, end):
 
 
 def extract_keywords(text: str) -> list:
-    """Lightweight keyword extractor - no NLTK dependency."""
     stopwords = {
         "the","a","an","and","or","but","in","on","at","to","for",
         "of","with","by","from","is","was","are","were","be","been",
@@ -255,7 +265,6 @@ def extract_keywords(text: str) -> list:
 # MODULE 3 - NICHE MATCHING AND YOUTUBE HARVESTING
 
 def match_niche(keywords: list) -> dict:
-    """Score each niche by keyword overlap and return best match."""
     best_niche  = "lifestyle"
     best_score  = -1
     keyword_set = set(keywords)
@@ -268,10 +277,6 @@ def match_niche(keywords: list) -> dict:
 
 
 def download_clip_section(yt_url: str, start_sec: float, duration: float, out_path: str) -> bool:
-    """
-    Use yt-dlp --download-sections to fetch ONLY the required seconds.
-    Merges to mp4. Returns True on success.
-    """
     end_sec  = start_sec + duration
     section  = f"*{start_sec:.2f}-{end_sec:.2f}"
     cmd = [
@@ -295,7 +300,6 @@ def download_clip_section(yt_url: str, start_sec: float, duration: float, out_pa
 
 
 def burn_attribution(input_path: str, output_path: str, channel_name: str, duration: float) -> bool:
-    """Burn semi-transparent attribution text via FFmpeg drawtext filter."""
     label = f"Source: {channel_name}"
     label = label.replace(":", r"\:").replace("'", r"\'").replace("%", r"\%")
     vf = (
@@ -322,10 +326,6 @@ def burn_attribution(input_path: str, output_path: str, channel_name: str, durat
 # MODULE 4A - FALLBACK MOTION GRAPHIC (Pillow)
 
 def create_motion_graphic_clip(keyword: str, duration: float, out_path: str, channel: str = "AI Generated") -> bool:
-    """
-    Generate a synthetic 1080p video slide with kinetic text using Pillow + FFmpeg.
-    Used when yt-dlp fails so the pipeline never crashes.
-    """
     try:
         frames_dir = Path(out_path).parent / ("_frames_" + Path(out_path).stem)
         frames_dir.mkdir(parents=True, exist_ok=True)
@@ -397,10 +397,9 @@ def create_motion_graphic_clip(keyword: str, duration: float, out_path: str, cha
         return False
 
 
-# MODULE 4B - FRAME STANDARDIZATION (1920x1080 @ 30fps)
+# MODULE 4B - FRAME STANDARDIZATION
 
 def standardize_clip(input_path: str, output_path: str) -> bool:
-    """Force every clip to 1920x1080, 30fps, AAC audio via FFmpeg scale+pad filters."""
     vf = (
         "scale=1920:1080:force_original_aspect_ratio=decrease,"
         "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
@@ -429,7 +428,6 @@ XFADE_EFFECTS = ["fade", "slideleft", "slideright", "dissolve", "wipeleft", "wip
 
 
 def get_clip_duration_ffprobe(path: str) -> float:
-    """Return clip duration in seconds using ffprobe."""
     cmd = [
         "ffprobe", "-v", "quiet",
         "-show_entries", "format=duration",
@@ -444,10 +442,6 @@ def get_clip_duration_ffprobe(path: str) -> float:
 
 
 def concatenate_with_xfade(clip_paths: list, output_path: str, sfx_path: str) -> bool:
-    """
-    Chain N clips together using FFmpeg xfade filter with 0.5s crossfade.
-    Returns True on success.
-    """
     if not clip_paths:
         return False
 
@@ -507,10 +501,6 @@ def concatenate_with_xfade(clip_paths: list, output_path: str, sfx_path: str) ->
 # MODULE 5 - MULTI-TRACK AUDIO MIXING WITH DUCKING
 
 def build_sfx_timeline(clip_durations: list) -> list:
-    """
-    Build list of (timestamp, sfx_path) pairs.
-    SFX triggers 0.25s BEFORE each xfade visual end so peak aligns at cut.
-    """
     sfx_path    = str(SFX_DIR / "whoosh.mp3")
     if not Path(sfx_path).exists():
         sfx_path = None
@@ -532,10 +522,6 @@ def mix_final_audio(
     output_path: str,
     clip_durations: list,
 ) -> bool:
-    """
-    Overlay narration (0 dB) + SFX events (-3 dB) with audio ducking during
-    xfade windows. Uses FFmpeg amix + adelay + volume filtergraph.
-    """
     inputs   = ["-i", video_path, "-i", narration_path]
     n_inputs = 2
 
@@ -606,7 +592,6 @@ def mix_final_audio(
 # MASTER PIPELINE ORCHESTRATOR
 
 def simple_concat_fallback(paths: list) -> str:
-    """Fallback: use FFmpeg concat demuxer (no transitions)."""
     try:
         list_file = str(TEMP_DIR / "concat_list.txt")
         with open(list_file, "w") as f:
@@ -630,7 +615,7 @@ def run_pipeline(audio_path: str, progress_bar, status_text) -> bool:
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
     # STEP 1: Transcribe
-    status_text.text("Step 1/5 - Running Whisper transcription (full audio, no cap)...")
+    status_text.text("Step 1/5 - Running Whisper transcription...")
     progress_bar.progress(5)
     segments = transcribe_audio(audio_path)
     if not segments:
@@ -746,6 +731,21 @@ def main():
     with st.spinner("Checking SFX assets..."):
         ensure_sfx()
 
+    # CHECK IF VIDEO ALREADY GENERATED
+    if OUTPUT_FILE.exists():
+        st.success("Your AI Documentary is ready!")
+        st.markdown("### Preview")
+        st.video(str(OUTPUT_FILE))
+        with open(str(OUTPUT_FILE), "rb") as vf:
+            st.download_button(
+                label="Download Final Video (MP4)",
+                data=vf,
+                file_name="ai_documentary.mp4",
+                mime="video/mp4",
+                use_container_width=True,
+            )
+        st.markdown("---")
+
     remaining = get_remaining_today()
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -789,6 +789,13 @@ def main():
                 st.stop()
 
             TEMP_DIR.mkdir(parents=True, exist_ok=True)
+            # Remove old output so fresh video is created
+            if OUTPUT_FILE.exists():
+                try:
+                    OUTPUT_FILE.unlink()
+                except Exception:
+                    pass
+
             audio_ext  = Path(uploaded_file.name).suffix
             audio_path = str(TEMP_DIR / f"narration{audio_ext}")
             with open(audio_path, "wb") as f:
